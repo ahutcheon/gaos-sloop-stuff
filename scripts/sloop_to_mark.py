@@ -7,7 +7,9 @@
 # usage:
 # sloop_to_mark.py [options] species site surveyfile.xls
 # options:
-# -v causes details of processing to be dumped to standard output
+# -v causes details of processing to be dumped to standard error
+
+# Note: errors and warnings go to stderr, verbose output goes to stdout
 
 import psycopg2	# postgres interface package
 import xlrd	# .xls decoder package
@@ -73,11 +75,15 @@ class SurveySeries:
 			size=3.5
 		else:	# convert unexpected sizes to 0
 			size = 0
-		if skink == "":		# anonymous singletons have been seen exactly once by definition, don't want to combine them
+		if skink == "SINGLETON_SO_FAR":		# anonymous singletons have been seen exactly once by definition, don't want to combine them
 			# add new entry with this date and size
 			self.skinks.append(skink)	# append skink to list
 			self.dates.append([date])	# append list containing date to list
 			self.sizes.append([size])	# ditto for size
+ 		elif skink == "NEVER_COMPARED":	# Unexpected in production use: indicates that Sloop matching has not been checked for this animal
+ 			# might be running the script for test or other purposes when Sloop matching incomplete
+ 			# warn the user, omit this animal so that MARK data only contains matched animals
+ 			print >> sys.stderr, "Warning: NEVER_COMPARED animal omitted from output files for MARK analysis"
 		else:	# a skink with an id
 			if skink in self.skinks:	# is this skink already in the list?
 				i=self.skinks.index(skink)	# yes: pick up its index
@@ -337,7 +343,7 @@ class SurveySeries:
 
 # complain and quit
 def usage_exit():
-	print "usage: sloop_to_mark.py [-v] species site surveyfile.xls"
+	print >> sys.stderr, "usage: sloop_to_mark.py [-v] species site surveyfile.xls"
 	sys.exit()
 
 # find the column headed by a cell containing the supplied string, complain and exit if we don't find it
@@ -347,7 +353,7 @@ def find_column(sheet,header):
 			return col
 	# if we got to here, we ran out of columns without finding the heading
 	# should perhaps raise an exception and let the caller deal with the problem?
-	print "No surveys found for site ", header, " for requested species"
+	print >> sys.stderr, "Error: No surveys found for site ", header, " for requested species"
 	sys.exit()
 
 # pull the survey out of the supplied column and assemble the object that will hold the sightings data
@@ -413,7 +419,7 @@ if species == "otago":
 elif species == "grand":
 	sp_database = "grandlive"
 else:
-	print "unknown species ", species 
+	print >> sys.stderr, "Error: unknown species ", species 
 	usage_exit()
 
 # do all the spreadsheet stuff before we touch the database
@@ -429,7 +435,7 @@ if verbose:
 try:	# connect to the database for the species; no password seems to be required
 	conn=psycopg2.connect(database=sp_database,user="skuser")
 except Exception, e:
-	print e.pgerror
+	print >> sys.stderr, e.pgerror
 	sys.exit()
 conn.set_session(readonly=True)	# to be safe, prevent us from accidentally damaging the database
 cur=conn.cursor()
