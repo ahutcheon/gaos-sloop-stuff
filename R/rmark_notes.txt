@@ -1,0 +1,91 @@
+Notes made while getting started with RMark - this process led to analyse_site_species
+
+Can use convert.inp to read curretly-emitted .inp files (data<-convert.inp("filename_without_inp_extension")
+No obvious advantage to emitting native RMark capture history format if this works?
+
+Robust design intervals are between surveys (i.e. one less interval than there are surveys in total)
+E.g. time_intervals<-c(0,0,0,1,0,0,1,0,0) for 4, 3, 3 surveys
+Python script sloop_to_mark.py emits this in a form that can be read into R:
+
+0.0 0.0 1.0 0.0 0.0 0.0 0.98 0.0 0.0 0.0 1.03 0.0 0.0 0.99 0.0
+as the first line of the site_species_surveys.txt file to be read in by:
+> intervals<-scan("site_species_surveys.txt", nlines=1)
+
+when running mark():
+model=RDHuggins (Mo and Mt) or RDHFHet (M+h and Mt+h)
+
+
+# this doesn't seem to do anything sensible
+> airport.time_intervals<-c(0,0,0,0,.96,0,0,.98,0,0,0,1.02,0,0,0,.99,0,0,0,0,1.02,0,0,.99,0,0,0,0)
+> airport.1<-mark(data=airport.ch, model="RDHuggins", time.intervals=airport.time_intervals)
+
+# is this an Mo model? hmm, we used to fix Gamma'' to 0...
+> S.time=list(formula=~time)
+> p.time.session=list(formula=~-1+session:time,share=TRUE)
+> GammaDoublePrime.random=list(formula=~time,share=TRUE)
+> airport.1<-mark(data=airport.ch, model="RDHuggins", time.intervals=airport.time_intervals, model.parameters=list(S=S.time,GammaDoublePrime=GammaDoublePrime.random,p=p.time.session))
+
+
+# these look like sensible N-hat estimates (very similar to last year's Mo numbers)
+> airport.1$results$derived
+  estimate        se      lcl      ucl
+1 120.8684 0.9658923 120.1496 125.0413
+2 128.5935 2.1635904 126.2081 135.6891
+3 133.2339 1.6108352 131.6284 138.9406p
+4 131.6249 1.3527430 130.3919 136.7375
+5 133.4581 1.2754781 132.3327 138.3894
+6 149.7012 2.1644163 147.2785 156.7152
+7 139.3310 0.5845007 139.0322 142.4082
+> 
+
+# should we use begin.time=0 rather than the mark() default of 1?
+
+# a model with single p=c and S, fixed gammas (0/1) so no immigration/emigration with superpopulation
+> p.dot=list(formula=~1, share=TRUE)
+> S.dot=list(formula=~1)
+> GammaDoublePrime.fixed=list(fixed=0)
+> GammaPrime.fixed=list(fixed=1)
+> airport.gammafix<-mark(data=airport.ch, model="RDHuggins", time.intervals=airport.time_intervals, model.parameters=list(S=S.dot,GammaDoublePrime=GammaDoublePrime.fixed,GammaPrime=GammaPrime.fixed,p=p.dot))
+
+# this model seems to give the same results as last year's Mo
+# (allowing for fixed 1 year session separation last year vs actual survey separation this year)
+# no idea why use of session/time doesn't seem consistent between formulea for p and S...
+> p.session=list(formula=~session, share=TRUE)
+> S.time=list(formula=~time)
+> airport.Mo.gammafix<-mark(data=airport.ch, model="RDHuggins", time.intervals=airport.time_intervals, model.parameters=list(S=S.time,GammaDoublePrime=GammaDoublePrime.fixed,GammaPrime=GammaPrime.fixed,p=p.session))
+
+# yep, if we go to last year's time intervals we get essentially the same values for p, S, N-hat as we did last year
+> airport.time_intervals2<-c(0,0,0,0,1,0,0,1,0,0,0,1,0,0,0,1,0,0,0,0,1,0,0,1,0,0,0,0)
+> airport.Mo2.gammafix<-mark(data=airport.ch, model="RDHuggins", time.intervals=airport.time_intervals2, model.parameters=list(S=S.time,GammaDoublePrime=GammaDoublePrime.fixed,GammaPrime=GammaPrime.fixed,p=p.session))
+
+# now we can start to put together a set of named models for later ranking with model.table()
+> Airport.Grand.dot.nm<-mark(data=airport.ch, model="RDHuggins", model.name="Airport.Grand.dot.nm", time.intervals=airport.time_intervals, model.parameters=list(S=S.dot,GammaDoublePrime=GammaDoublePrime.fixed,GammaPrime=GammaPrime.fixed,p=p.dot))
+> Airport.Grand.Mo.nm<-mark(data=airport.ch, model="RDHuggins", model.name="Airport.Grand.Mo.nm", time.intervals=airport.time_intervals, model.parameters=list(S=S.time,GammaDoublePrime=GammaDoublePrime.fixed,GammaPrime=GammaPrime.fixed,p=p.session))
+> Airport.Grand.Mt.nm<-mark(data=airport.ch, model="RDHuggins", model.name="Airport.Grand.Mt.nm", time.intervals=airport.time_intervals, model.parameters=list(S=S.time,GammaDoublePrime=GammaDoublePrime.fixed,GammaPrime=GammaPrime.fixed,p=p.time.session))
+
+# for the heterogeneity models, need to use mixture in the p formula (additive: want to estimate p for each half of the mix)
+# having pi (the het split) vary by session reproduces what we used to do via the Mark interface
+# (maybe we should also model a single split i.e. pi.dot=list(formula=~1) ?)
+> p.session.mixture=list(formula=~session+mixture, share=TRUE)
+> pi.session=list(formula=~session)
+> Airport.Grand.Mh.nm<-mark(data=airport.ch, model="RDHFHet", model.name="Airport.Grand.Mh.nm", time.intervals=airport.time_intervals, model.parameters=list(S=S.time,GammaDoublePrime=GammaDoublePrime.fixed,GammaPrime=GammaPrime.fixed,p=p.session.mixture,pi=pi.session))
+
+> p.time.session.mixture=list(formula=~-1+session:time+mixture,share=TRUE)
+> Airport.Grand.Mht.nm<-mark(data=airport.ch, model="RDHFHet", model.name="Airport.Grand.Mht.nm", time.intervals=airport.time_intervals, model.parameters=list(S=S.time,GammaDoublePrime=GammaDoublePrime.fixed,GammaPrime=GammaPrime.fixed,p=p.time.session.mixture,pi=pi.session))
+
+# now we can look at different emigration models (for now, we'll stick with the top model: Mht
+> GammaDoublePrime.random=list(formula=~time,share=TRUE)
+> Airport.Grand.Mht.rm<-mark(data=airport.ch, model="RDHFHet", model.name="Airport.Grand.Mht.rm", time.intervals=airport.time_intervals, model.parameters=list(S=S.time,GammaDoublePrime=GammaDoublePrime.random,p=p.time.session.mixture,pi=pi.session))
+
+# and a simplified random model that doesn't look for between-year differences
+> GammaDoublePrime.dotshare=list(formula=~1,share=TRUE)
+> Airport.Grand.Mht.rms<-mark(data=airport.ch, model="RDHFHet", model.name="Airport.Grand.Mht.rms", time.intervals=airport.time_intervals, model.parameters=list(S=S.time,GammaDoublePrime=GammaDoublePrime.dotshare,p=p.time.session.mixture,pi=pi.session))
+
+# Markovian movement
+> GammaDoublePrime.dot=list(formula=~1)
+> GammaPrime.dot=list(formula=~1)
+> Airport.Grand.Mht.mm<-mark(data=airport.ch, model="RDHFHet", model.name="Airport.Grand.Mht.mm", time.intervals=airport.time_intervals, model.parameters=list(S=S.time,GammaDoublePrime=GammaDoublePrime.dot,GammaPrime=GammaPrime.dot,p=p.time.session.mixture,pi=pi.session))
+
+
+
+
